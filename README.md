@@ -124,7 +124,3 @@ build_example.bat
 - **Memory**: ~1KB for interface caching
 - **Accuracy**: Reflects actual OS network counters
 - **Thread Safety**: Safe for concurrent access
-
-## License
-
-[Your license here]
