@@ -4,7 +4,7 @@ A high-performance, modern Rust library for monitoring network interface speeds 
 
 [![Crates.io](https://img.shields.io/crates/v/network-speed.svg)](https://crates.io/crates/network-speed)
 [![Documentation](https://docs.rs/network-speed/badge.svg)](https://docs.rs/network-speed)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 
 ## Features
 
