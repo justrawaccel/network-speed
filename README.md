@@ -20,7 +20,8 @@ A high-performance, modern Rust library for monitoring network interface speeds 
 ## Documentation
 
 The complete usage guide, configuration reference, and copy-ready examples now live in
-[DOCS.md](./DOCS.md). Check that file whenever you need detailed instructions beyond this overview.
+[DOCS.md](./DOCS.md). Online rendered docs (including API references) are available on
+[docs.rs](https://docs.rs/network-speed).
 
 ## Contributing
 

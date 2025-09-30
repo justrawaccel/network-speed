@@ -1,3 +1,7 @@
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/DOCS.md"))]
+#![doc(html_root_url = "https://docs.rs/network-speed")]
+
 pub mod types;
 pub mod monitor;
 

@@ -68,7 +68,7 @@ network-speed = { version = "0.2", features = ["serde"] }
 
 ### Synchronous monitoring
 
-```rust
+```rust,no_run
 use network_speed::NetworkMonitor;
 use std::time::Duration;
 use std::thread;
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Asynchronous monitoring
 
-```rust
+```rust,ignore
 use network_speed::AsyncNetworkMonitor;
 use tokio::time::{sleep, Duration};
 
@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Custom configuration
 
-```rust
+```rust,no_run
 use network_speed::{NetworkMonitor, NetworkMonitorConfig};
 use std::time::Duration;
 
@@ -142,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Tracking with history
 
-```rust
+```rust,no_run
 use network_speed::NetworkSpeedTracker;
 use std::time::Duration;
 
@@ -185,9 +185,7 @@ The library automatically detects and can filter various types of interfaces:
 
 ### Listing available interfaces
 
-```rust
-use network_speed;
-
+```rust,no_run
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let interfaces = network_speed::list_interfaces()?;
 
@@ -207,7 +205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Advanced monitoring
 
-```rust
+```rust,ignore
 use network_speed::AsyncNetworkMonitor;
 use tokio::time::Duration;
 
@@ -233,7 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Formatting helpers
 
-```rust
+```rust,no_run
 use network_speed::NetworkSpeed;
 
 let speed = NetworkSpeed::new(1_048_576, 2_097_152); // 1 MB/s up, 2 MB/s down
@@ -247,7 +245,7 @@ println!("Active: {}", speed.is_active(1024)); // Active if > 1 KB/s
 
 ### Inspect interface helpers
 
-```rust
+```rust,no_run
 use network_speed::list_interfaces;
 
 fn main() -> network_speed::Result<()> {
@@ -270,7 +268,9 @@ fn main() -> network_speed::Result<()> {
 
 ## System tray integration
 
-For a complete tray-application example, reference `examples/tray_monitor.rs`. It demonstrates:
+For a complete tray-application example, reference
+[`examples/tray_monitor.rs`](https://github.com/justrawaccel/network-speed/blob/main/examples/tray_monitor.rs).
+It demonstrates:
 
 - Background monitoring threads
 - Inter-thread communication with channels
@@ -281,7 +281,7 @@ For a complete tray-application example, reference `examples/tray_monitor.rs`. I
 
 ## Error handling
 
-```rust
+```rust,no_run
 use network_speed::{NetworkMonitor, NetworkError};
 
 let mut monitor = NetworkMonitor::new();
@@ -361,4 +361,6 @@ cargo run --features cli --bin network-speed monitor
 ---
 
 Need something that is not covered here? Open an issue or start a discussion—contributions are always
-welcome! Consult `CONTRIBUTING.md` before submitting pull requests.
+welcome! Consult the
+[contribution guide](https://github.com/justrawaccel/network-speed/blob/main/CONTRIBUTING.md)
+before submitting pull requests.
