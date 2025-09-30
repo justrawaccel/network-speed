@@ -82,21 +82,26 @@ If you are unsure whether an idea fits the roadmap, open an issue or start a dis
 ## Development workflow
 
 1. **Fork & branch**
+
    - Fork the repo and create a feature branch: `git checkout -b feature/my-improvement`.
 
 2. **Implement your change**
+
    - Follow coding standards and keep changes scoped. Update documentation alongside code.
 
 3. **Run checks locally**
+
    - `cargo fmt --all`
    - `cargo clippy --all-targets --all-features -- -D warnings`
    - `cargo test` (see [Testing & quality gates](#testing--quality-gates))
 
 4. **Commit with context**
+
    - Use descriptive commit messages (e.g., `Add async helper for interface refresh`).
    - Reference related issues in the body where relevant.
 
 5. **Open a pull request**
+
    - Provide a summary, testing evidence, and screenshots/logs if useful.
    - Template (if available) must be filled out completely.
 
@@ -124,6 +129,7 @@ cargo test --all-features
 ```
 
 Notes:
+
 - Some integration tests call Windows APIs; they are skipped or no-ops on non-Windows hosts.
 - If you add new features behind flags, ensure tests cover both feature-enabled and disabled states when possible.
 - Include benchmarks or performance notes for changes that impact runtime characteristics.
