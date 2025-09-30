@@ -1,14 +1,43 @@
 [package]
 name = "network-speed"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+authors = ["Nazar <x@justrawaccel.dev>"]
+description = "🚀 A high-performance network speed monitoring library for Windows"
+license = "MIT"
+repository = "https://github.com/justrawaccel/network-speed"
+keywords = ["network", "speed", "monitoring", "windows", "bandwidth"]
+categories = ["network-programming", "os::windows-apis"]
+
+
+[[bin]]
+name = "network-speed"
+path = "src/main.rs"
+required-features = ["cli"]
 
 [lib]
-crate-type = ["cdylib"]
+name = "network_speed"
+crate-type = ["rlib"]
 
 [dependencies]
-windows = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_NetworkManagement_IpHelper",
-] }
-once_cell = "1.19"
+windows = { version = "0.52", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"] }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
+tokio = { version = "1.0", features = ["time", "rt", "sync"], optional = true }
+chrono = { version = "0.4", default-features = true, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+chrono = { version = "0.4", default-features = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+async = ["dep:tokio"]
+cli = ["dep:chrono"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
