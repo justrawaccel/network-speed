@@ -1,8 +1,8 @@
 use network_speed::{
+	list_interfaces,
 	NetworkMonitor,
 	NetworkMonitorConfig,
 	NetworkSpeedTracker,
-	list_interfaces,
 };
 use std::time::Duration;
 

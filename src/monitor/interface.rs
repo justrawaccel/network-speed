@@ -1,10 +1,19 @@
 use std::collections::{ HashMap, HashSet };
 use windows::{
-	Win32::Foundation::{ ERROR_INSUFFICIENT_BUFFER, NO_ERROR },
-	Win32::NetworkManagement::IpHelper::{ GetIfTable, MIB_IFTABLE, MIB_IFROW, INTERNAL_IF_OPER_STATUS },
+	core::HRESULT,
+	Win32::Foundation::{ ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_FUNCTION, FALSE, NO_ERROR },
+	Win32::NetworkManagement::IpHelper::{
+		FreeMibTable,
+		GetIfTable,
+		GetIfTable2,
+		MIB_IFROW,
+		MIB_IFTABLE,
+		MIB_IF_ROW2,
+		MIB_IF_TABLE2,
+	},
 };
 
-use crate::types::{ NetworkError, Result, NetworkMonitorConfig, format_bits_per_second };
+use crate::types::{ format_bits_per_second, NetworkError, NetworkMonitorConfig, Result };
 
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
@@ -18,17 +27,45 @@ pub struct NetworkInterface {
 }
 
 impl NetworkInterface {
-	pub fn from_mib_ifrow(row: &MIB_IFROW) -> Result<Self> {
-		let description = unsafe {
-			let desc_slice = std::slice::from_raw_parts(row.bDescr.as_ptr(), row.dwDescrLen as usize);
-			String::from_utf8_lossy(desc_slice).into_owned()
-		};
+	pub fn from_mib_ifrow(row: &MIB_IF_ROW2) -> Result<Self> {
+		let description = utf16_to_string(&row.Description);
+		let alias = utf16_to_string(&row.Alias);
+		let friendly = if !alias.is_empty() { alias } else { description.clone() };
+
+		let transmit_speed = if row.TransmitLinkSpeed == 0 { row.ReceiveLinkSpeed } else { row.TransmitLinkSpeed };
+
+		Ok(NetworkInterface {
+			index: row.InterfaceIndex,
+			interface_type: row.Type,
+			description: if friendly.is_empty() {
+				description
+			} else {
+				friendly
+			},
+			// NET_IF_OPER_STATUS_UP is defined as 1.
+			is_operational: row.OperStatus.0 == 1,
+			bytes_sent: row.OutOctets,
+			bytes_received: row.InOctets,
+			speed: transmit_speed,
+		})
+	}
+
+	pub fn from_legacy_mib_ifrow(row: &MIB_IFROW) -> Result<Self> {
+		let desc_len = (row.dwDescrLen as usize).min(row.bDescr.len());
+		let description = String::from_utf8_lossy(&row.bDescr[..desc_len])
+			.trim()
+			.to_string();
+		let friendly = description.clone();
 
 		Ok(NetworkInterface {
 			index: row.dwIndex,
 			interface_type: row.dwType,
-			description,
-			is_operational: row.dwOperStatus == INTERNAL_IF_OPER_STATUS(1),
+			description: if friendly.is_empty() {
+				description
+			} else {
+				friendly
+			},
+			is_operational: row.dwOperStatus.0 == 1,
 			bytes_sent: row.dwOutOctets as u64,
 			bytes_received: row.dwInOctets as u64,
 			speed: row.dwSpeed as u64,
@@ -86,13 +123,11 @@ impl InterfaceManager {
 	}
 
 	pub fn get_active_interfaces(&mut self) -> Result<Vec<NetworkInterface>> {
-		let raw_interfaces = get_raw_interfaces()?;
+		let enumerated = get_raw_interfaces()?;
 		let mut active_interfaces = Vec::new();
 		let mut active_indices = HashSet::new();
 
-		for raw_interface in raw_interfaces {
-			let interface = NetworkInterface::from_mib_ifrow(&raw_interface)?;
-
+		for interface in enumerated {
 			if self.should_include_interface(&interface) {
 				self.interface_cache.insert(interface.index, interface.clone());
 				active_indices.insert(interface.index);
@@ -136,6 +171,22 @@ impl InterfaceManager {
 	}
 
 	fn should_include_interface(&self, interface: &NetworkInterface) -> bool {
+		if
+			!self.config.include_interface_indices.is_empty() &&
+			!self.config.include_interface_indices.contains(&interface.index)
+		{
+			return false;
+		}
+
+		let desc_lower = interface.description.to_lowercase();
+
+		if
+			!self.config.include_interface_name_patterns.is_empty() &&
+			!self.config.include_interface_name_patterns.iter().any(|pattern| desc_lower.contains(&pattern.to_lowercase()))
+		{
+			return false;
+		}
+
 		if self.config.exclude_loopback && interface.is_loopback() {
 			return false;
 		}
@@ -153,7 +204,6 @@ impl InterfaceManager {
 		}
 
 		if !self.config.interface_name_filters.is_empty() {
-			let desc_lower = interface.description.to_lowercase();
 			let should_exclude = self.config.interface_name_filters
 				.iter()
 				.any(|filter| desc_lower.contains(&filter.to_lowercase()));
@@ -167,36 +217,62 @@ impl InterfaceManager {
 	}
 }
 
-fn get_raw_interfaces() -> Result<Vec<MIB_IFROW>> {
-	unsafe {
-		let mut buffer_size = 0u32;
-		let result = GetIfTable(None, &mut buffer_size, false);
+fn get_raw_interfaces() -> Result<Vec<NetworkInterface>> {
+	let result = unsafe { collect_interfaces_v2() };
 
-		if result != ERROR_INSUFFICIENT_BUFFER.0 {
-			return Err(NetworkError::WindowsApi(windows::core::Error::from_win32()));
+	match result {
+		Ok(interfaces) => Ok(interfaces),
+		Err(NetworkError::WindowsApi(err)) if err.code() == HRESULT::from_win32(ERROR_INVALID_FUNCTION.0 as u32) => unsafe {
+			collect_interfaces_v1()
 		}
-
-		let layout = std::alloc::Layout
-			::from_size_align(buffer_size as usize, 8)
-			.map_err(|_| NetworkError::MemoryAllocation)?;
-		let buffer = std::alloc::alloc(layout) as *mut MIB_IFTABLE;
-
-		if buffer.is_null() {
-			return Err(NetworkError::MemoryAllocation);
-		}
-
-		let result = GetIfTable(Some(buffer), &mut buffer_size, false);
-		if result != NO_ERROR.0 {
-			std::alloc::dealloc(buffer as *mut u8, layout);
-			return Err(NetworkError::WindowsApi(windows::core::Error::from_win32()));
-		}
-
-		let table = &*buffer;
-		let interfaces = std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize).to_vec();
-
-		std::alloc::dealloc(buffer as *mut u8, layout);
-		Ok(interfaces)
+		Err(e) => Err(e),
 	}
+}
+
+unsafe fn collect_interfaces_v2() -> Result<Vec<NetworkInterface>> {
+	let mut table_ptr: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+	GetIfTable2(&mut table_ptr).map_err(NetworkError::WindowsApi)?;
+
+	let table = &*table_ptr;
+	let slice = std::slice::from_raw_parts(table.Table.as_ptr(), table.NumEntries as usize);
+	let mut interfaces = Vec::with_capacity(slice.len());
+
+	for row in slice {
+		interfaces.push(NetworkInterface::from_mib_ifrow(row)?);
+	}
+
+	if let Err(err) = FreeMibTable(table_ptr as _) {
+		return Err(NetworkError::WindowsApi(err));
+	}
+
+	Ok(interfaces)
+}
+
+unsafe fn collect_interfaces_v1() -> Result<Vec<NetworkInterface>> {
+	let mut size = 0u32;
+	let mut status = GetIfTable(None, &mut size, FALSE);
+	if status != ERROR_INSUFFICIENT_BUFFER.0 {
+		let err = windows::core::Error::from(HRESULT::from_win32(status));
+		return Err(NetworkError::WindowsApi(err));
+	}
+
+	let mut buffer = vec![0u8; size as usize];
+	let table_ptr = buffer.as_mut_ptr() as *mut MIB_IFTABLE;
+	status = GetIfTable(Some(table_ptr), &mut size, FALSE);
+	if status != NO_ERROR.0 {
+		let err = windows::core::Error::from(HRESULT::from_win32(status));
+		return Err(NetworkError::WindowsApi(err));
+	}
+
+	let table = &*table_ptr;
+	let rows = std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize);
+	let mut interfaces = Vec::with_capacity(rows.len());
+
+	for row in rows {
+		interfaces.push(NetworkInterface::from_legacy_mib_ifrow(row)?);
+	}
+
+	Ok(interfaces)
 }
 
 fn is_virtual_interface_by_description(description: &str) -> bool {
@@ -228,18 +304,19 @@ fn is_virtual_interface_by_description(description: &str) -> bool {
 }
 
 pub fn list_all_interfaces() -> Result<Vec<NetworkInterface>> {
-	let raw_interfaces = get_raw_interfaces()?;
-	let mut interfaces = Vec::new();
-
-	for raw_interface in raw_interfaces {
-		let interface = NetworkInterface::from_mib_ifrow(&raw_interface)?;
-		interfaces.push(interface);
-	}
-
-	Ok(interfaces)
+	get_raw_interfaces()
 }
 
 pub fn get_interface_count() -> Result<usize> {
-	let interfaces = get_raw_interfaces()?;
-	Ok(interfaces.len())
+	Ok(get_raw_interfaces()?.len())
+}
+
+fn utf16_to_string(buf: &[u16]) -> String {
+	let len = buf
+		.iter()
+		.position(|&c| c == 0)
+		.unwrap_or(buf.len());
+	String::from_utf16_lossy(&buf[..len])
+		.trim()
+		.to_string()
 }

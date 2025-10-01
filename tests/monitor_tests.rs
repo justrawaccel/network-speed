@@ -1,12 +1,12 @@
 use network_speed::{
-	NetworkMonitor,
-	NetworkSpeedTracker,
-	NetworkMonitorConfig,
-	list_interfaces,
 	get_interface_count,
+	list_interfaces,
+	NetworkMonitor,
+	NetworkMonitorConfig,
+	NetworkSpeedTracker,
 };
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 #[cfg(feature = "async")]
 use network_speed::{ AsyncNetworkMonitor, AsyncNetworkSpeedTracker };
@@ -120,14 +120,20 @@ fn test_interface_count() {
 #[test]
 fn test_virtual_interface_detection() {
 	use network_speed::NetworkInterface;
-	use windows::Win32::NetworkManagement::IpHelper::MIB_IFROW;
+	use windows::Win32::NetworkManagement::IpHelper::MIB_IF_ROW2;
 
-	let mut row = MIB_IFROW::default();
-	row.dwDescrLen = "VMware Virtual Ethernet Adapter".len() as u32;
+	let mut row = MIB_IF_ROW2::default();
+	row.InterfaceIndex = 42;
+	row.Type = 6; // Ethernet
+	row.TransmitLinkSpeed = 1_000_000;
+	row.ReceiveLinkSpeed = 1_000_000;
+	row.OutOctets = 1_000;
+	row.InOctets = 2_000;
+	row.OperStatus.0 = 1; // Up
 
-	let desc_bytes = b"VMware Virtual Ethernet Adapter";
-	for (slot, byte) in row.bDescr.iter_mut().zip(desc_bytes.iter()) {
-		*slot = *byte;
+	let description = "VMware Virtual Ethernet Adapter";
+	for (dst, src) in row.Description.iter_mut().zip(description.encode_utf16()) {
+		*dst = src;
 	}
 
 	let interface = NetworkInterface::from_mib_ifrow(&row).unwrap();

@@ -1,10 +1,12 @@
 use network_speed::{
+	format_bits_per_second,
+	format_bytes_per_second,
+	InterfaceStats,
 	NetworkMonitorConfig,
 	NetworkSpeed,
-	InterfaceStats,
-	format_bytes_per_second,
-	format_bits_per_second,
+	PrecisionMode,
 };
+use std::num::NonZeroU8;
 use std::time::Duration;
 
 #[test]
@@ -45,6 +47,7 @@ fn test_config_default() {
 	assert!(config.exclude_loopback);
 	assert!(config.exclude_bluetooth);
 	assert_eq!(config.min_measurement_interval, Duration::from_millis(100));
+	assert!(matches!(config.precision, PrecisionMode::Instant));
 }
 
 #[test]
@@ -53,7 +56,12 @@ fn test_config_builder() {
 		.exclude_virtual(false)
 		.exclude_loopback(false)
 		.min_measurement_interval(Duration::from_millis(500))
+		.include_interface_indices(vec![1, 2])
+		.include_interface_name_patterns(vec!["Ethernet".to_string()])
 		.add_interface_name_filter("eth0".to_string())
+		.precision(PrecisionMode::Windowed {
+			duration: Duration::from_millis(750),
+		})
 		.build()
 		.unwrap();
 
@@ -61,6 +69,13 @@ fn test_config_builder() {
 	assert!(!config.exclude_loopback);
 	assert_eq!(config.min_measurement_interval, Duration::from_millis(500));
 	assert_eq!(config.interface_name_filters.len(), 1);
+	assert_eq!(config.include_interface_indices, vec![1, 2]);
+	assert_eq!(config.include_interface_name_patterns, vec!["Ethernet".to_string()]);
+	match config.precision {
+		PrecisionMode::Windowed { duration } =>
+			assert_eq!(duration, Duration::from_millis(750)),
+		_ => panic!("Unexpected precision mode"),
+	}
 }
 
 #[test]
@@ -70,6 +85,45 @@ fn test_config_validation() {
 		.build();
 
 	assert!(result.is_err());
+}
+
+#[test]
+fn test_precision_samples_validation() {
+	let result = NetworkMonitorConfig::builder()
+		.precision(PrecisionMode::Samples {
+			samples: NonZeroU8::new(1).unwrap(),
+			interval: Duration::from_millis(100),
+		})
+		.build();
+
+	assert!(result.is_err());
+}
+
+#[test]
+fn test_precision_windowed_validation() {
+	let result = NetworkMonitorConfig::builder()
+		.precision(PrecisionMode::Windowed {
+			duration: Duration::from_millis(0),
+		})
+		.build();
+
+	assert!(result.is_err());
+}
+
+#[test]
+fn test_config_fluent_precision() {
+	let config = NetworkMonitorConfig::new().with_precision(PrecisionMode::Samples {
+		samples: NonZeroU8::new(3).unwrap(),
+		interval: Duration::from_millis(200),
+	});
+
+	match config.precision {
+		PrecisionMode::Samples { samples, interval } => {
+			assert_eq!(samples.get(), 3);
+			assert_eq!(interval, Duration::from_millis(200));
+		}
+		_ => panic!("Expected samples precision"),
+	}
 }
 
 #[test]

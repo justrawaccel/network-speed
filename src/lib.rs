@@ -2,11 +2,11 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/DOCS.md"))]
 #![doc(html_root_url = "https://docs.rs/network-speed")]
 
-pub mod types;
 pub mod monitor;
+pub mod types;
 
-pub use types::*;
 pub use monitor::*;
+pub use types::*;
 
 pub use monitor::sync_monitor::{ NetworkMonitor, NetworkSpeedTracker };
 

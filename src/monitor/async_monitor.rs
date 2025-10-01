@@ -1,11 +1,11 @@
 use std::collections::VecDeque;
-use std::time::{ Duration, Instant };
-use tokio::time::{ interval, MissedTickBehavior };
-use tokio::sync::mpsc;
 use std::sync::{ Arc, Mutex };
+use std::time::{ Duration, Instant };
+use tokio::sync::mpsc;
+use tokio::time::{ interval, MissedTickBehavior };
 
-use crate::types::{ NetworkError, Result, NetworkSpeed, NetworkMonitorConfig };
 use crate::monitor::NetworkMonitor;
+use crate::types::{ NetworkError, NetworkMonitorConfig, NetworkSpeed, PrecisionMode, Result };
 
 pub struct AsyncNetworkMonitor {
 	inner: Arc<Mutex<NetworkMonitor>>,
@@ -102,7 +102,9 @@ impl AsyncNetworkMonitor {
 	pub async fn monitor_continuously<F>(&self, interval_duration: Duration, mut callback: F) -> Result<()>
 		where F: FnMut(Result<NetworkSpeed>) + Send + 'static
 	{
-		let mut interval_timer = interval(interval_duration);
+		let config = self.get_config().await;
+		let effective_interval = effective_interval(interval_duration, &config);
+		let mut interval_timer = interval(effective_interval);
 		interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
 		loop {
@@ -119,9 +121,11 @@ impl AsyncNetworkMonitor {
 	) -> Result<mpsc::Receiver<Result<NetworkSpeed>>> {
 		let (tx, rx) = mpsc::channel(buffer_size);
 		let monitor = Arc::clone(&self.inner);
+		let config = self.get_config().await;
+		let effective_interval = effective_interval(interval_duration, &config);
 
 		tokio::spawn(async move {
-			let mut interval_timer = interval(interval_duration);
+			let mut interval_timer = interval(effective_interval);
 			interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
 			loop {
@@ -130,8 +134,10 @@ impl AsyncNetworkMonitor {
 				let result = {
 					let monitor_clone = Arc::clone(&monitor);
 					let result = tokio::task::spawn_blocking(move || {
-						let mut mon = monitor_clone.lock().map_err(|_| NetworkError::InterfaceOperationFailed {
-							reason: "Monitor mutex poisoned".to_string(),
+						let mut mon = monitor_clone.lock().map_err(|_| {
+							NetworkError::InterfaceOperationFailed {
+								reason: "Monitor mutex poisoned".to_string(),
+							}
 						})?;
 						mon.measure_speed()
 					}).await;
@@ -153,8 +159,10 @@ impl AsyncNetworkMonitor {
 	}
 
 	pub async fn collect_samples(&self, sample_count: usize, interval_duration: Duration) -> Result<Vec<NetworkSpeed>> {
+		let config = self.get_config().await;
+		let effective_interval = effective_interval(interval_duration, &config);
 		let mut samples = Vec::with_capacity(sample_count);
-		let mut interval_timer = interval(interval_duration);
+		let mut interval_timer = interval(effective_interval);
 		interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
 		for _ in 0..sample_count {
@@ -172,7 +180,7 @@ impl AsyncNetworkMonitor {
 
 		if samples.is_empty() {
 			return Err(NetworkError::InsufficientTimeElapsed {
-				min_ms: interval_duration.as_millis() as u64,
+				min_ms: effective_interval.as_millis() as u64,
 				actual_ms: 0,
 			});
 		}
@@ -407,4 +415,22 @@ impl AsyncNetworkSpeedTracker {
 
 		Ok(rx)
 	}
+}
+
+fn effective_interval(requested: Duration, config: &NetworkMonitorConfig) -> Duration {
+	let mut interval = requested.max(config.min_measurement_interval);
+
+	match &config.precision {
+		PrecisionMode::Instant => interval,
+		PrecisionMode::Windowed { duration } => interval.max(*duration),
+		PrecisionMode::Samples { samples, interval: sample_interval } => {
+			let sample_count: u32 = samples.get().into();
+			let total_sample_window = saturating_mul_duration(*sample_interval, sample_count);
+			interval.max(total_sample_window)
+		}
+	}
+}
+
+fn saturating_mul_duration(duration: Duration, factor: u32) -> Duration {
+	duration.checked_mul(factor).unwrap_or(Duration::MAX)
 }

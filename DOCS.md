@@ -38,7 +38,8 @@ statistics, and formatting speeds for display.
 
 - **🚀 High performance**: Minimal allocations with Windows IP Helper API under the hood.
 - **🔄 Sync & async APIs**: Choose blocking or Tokio-powered workflows via feature flags.
-- **🎛️ Configurable filtering**: Exclude virtual, loopback, Bluetooth, or custom interface patterns.
+- **🎛️ Configurable filtering**: Exclude or include interfaces by type, index, or name pattern.
+- **🎯 Precision profiles**: Choose instant, windowed, or sampled measurement strategies.
 - **🛡️ Type safety**: Strongly typed builders, error enums, and speed structs.
 - **📊 Rich metrics**: Helpers for bytes, bits, totals, Mbps, and formatted output.
 - **📈 Historical tracking**: Built-in speed history with averages and peaks.
@@ -121,8 +122,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Custom configuration
 
 ```rust,no_run
-use network_speed::{NetworkMonitor, NetworkMonitorConfig};
-use std::time::Duration;
+use network_speed::{NetworkMonitor, NetworkMonitorConfig, PrecisionMode};
+use std::{num::NonZeroU8, time::Duration};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = NetworkMonitorConfig::builder()
@@ -130,6 +131,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .exclude_bluetooth(true)   // Exclude Bluetooth interfaces
         .min_measurement_interval(Duration::from_millis(50))
         .add_interface_name_filter("vmware".to_string()) // Filter specific interfaces
+        .include_interface_indices(vec![1, 12])            // Force-include adapters by index
+        .include_interface_name_patterns(vec!["Wi-Fi".into()]) // Include by fuzzy name matches
+        .precision(PrecisionMode::Samples {
+            samples: NonZeroU8::new(4).unwrap(),
+            interval: Duration::from_millis(250),
+        })
         .build()?;
 
     let mut monitor = NetworkMonitor::with_config(config);
@@ -139,6 +146,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+#### Precision profiles
+
+`PrecisionMode` lets you trade latency for tighter accuracy without rewriting measurement code:
+
+- `PrecisionMode::Instant` (default) reuses cached interface counters for near-zero overhead.
+- `PrecisionMode::Windowed { duration }` performs a blocking measurement window using fresh
+  counters before reporting throughput, offering smoother numbers for bursty traffic.
+- `PrecisionMode::Samples { samples, interval }` collects multiple windowed samples and averages
+  them, ideal for UI displays that need rock-solid readings.
+
+Each mode automatically respects `min_measurement_interval`; builder validation ensures sample
+counts and intervals are sensible.
+
+#### Manual inclusion filters
+
+Pair inclusion lists with the existing exclusion filters to focus on specific adapters:
+
+- `include_interface_indices`: whitelist adapters by their stable system index.
+- `include_interface_name_patterns`: accept adapters whose description contains any substring.
+
+Inclusions are evaluated before exclusions, guaranteeing you can always capture high-priority
+interfaces even when running with aggressive filters.
 
 ### Tracking with history
 
@@ -308,7 +338,10 @@ match monitor.measure_speed() {
 - `min_measurement_interval`: Smallest allowed interval between measurements (default: `100 ms`).
 - `interface_name_filters`: Case-insensitive substrings to exclude specific adapters.
 - `interface_type_filters`: Filter by Windows interface type IDs.
+- `include_interface_indices`: Explicit allow-list of interface indices that always pass filters.
+- `include_interface_name_patterns`: Case-insensitive substrings to include even if exclusions match.
 - `max_counter_wrap_threshold`: Guard against counter wrap/overflow scenarios.
+- `precision`: Measurement strategy (`Instant`, `Windowed`, or `Samples`).
 
 ---
 

@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::time::{ Duration, Instant };
 
-use crate::types::{ NetworkError, Result, NetworkSpeed, InterfaceStats, NetworkMonitorConfig };
 use crate::monitor::InterfaceManager;
+use crate::types::{ InterfaceStats, NetworkError, NetworkMonitorConfig, NetworkSpeed, PrecisionMode, Result };
 
 pub struct NetworkMonitor {
 	config: NetworkMonitorConfig,
@@ -26,28 +26,15 @@ impl NetworkMonitor {
 	}
 
 	pub fn measure_speed(&mut self) -> Result<NetworkSpeed> {
-		let current_stats = self.get_current_stats()?;
-		let timestamp = Instant::now();
-
-		let speed = if let Some(ref previous) = self.previous_stats {
-			self.calculate_speed(&current_stats, previous, timestamp)?
-		} else {
-			NetworkSpeed::new(0, 0)
-		};
-
-		self.previous_stats = Some(current_stats);
-		Ok(speed)
+		match &self.config.precision {
+			PrecisionMode::Instant => self.measure_instant(),
+			PrecisionMode::Windowed { duration } => self.measure_windowed(*duration),
+			PrecisionMode::Samples { samples, interval } => { self.measure_samples(samples.get(), *interval) }
+		}
 	}
 
 	pub fn measure_speed_blocking(&mut self, measurement_duration: Duration) -> Result<NetworkSpeed> {
-		let initial_stats = self.get_current_stats()?;
-
-		std::thread::sleep(measurement_duration);
-
-		let final_stats = self.get_current_stats()?;
-		let timestamp = Instant::now();
-
-		self.calculate_speed(&final_stats, &initial_stats, timestamp)
+		self.measure_windowed(measurement_duration)
 	}
 
 	pub fn get_instantaneous_speed(&mut self) -> Result<Option<NetworkSpeed>> {
@@ -90,6 +77,47 @@ impl NetworkMonitor {
 			bytes_received: total_received,
 			last_update: Instant::now(),
 		})
+	}
+
+	fn measure_instant(&mut self) -> Result<NetworkSpeed> {
+		let current_stats = self.get_current_stats()?;
+		let timestamp = current_stats.last_update;
+
+		let speed = if let Some(ref previous) = self.previous_stats {
+			self.calculate_speed(&current_stats, previous, timestamp)?
+		} else {
+			NetworkSpeed::new(0, 0)
+		};
+
+		self.previous_stats = Some(current_stats);
+		Ok(speed)
+	}
+
+	fn measure_windowed(&mut self, duration: Duration) -> Result<NetworkSpeed> {
+		let initial_stats = self.get_current_stats()?;
+		std::thread::sleep(duration);
+		let final_stats = self.get_current_stats()?;
+		let timestamp = final_stats.last_update;
+		let speed = self.calculate_speed(&final_stats, &initial_stats, timestamp)?;
+		self.previous_stats = Some(final_stats);
+		Ok(speed)
+	}
+
+	fn measure_samples(&mut self, samples: u8, interval: Duration) -> Result<NetworkSpeed> {
+		let mut total_upload: u128 = 0;
+		let mut total_download: u128 = 0;
+
+		for _ in 0..samples {
+			let speed = self.measure_windowed(interval)?;
+			total_upload += speed.upload_bytes_per_sec as u128;
+			total_download += speed.download_bytes_per_sec as u128;
+		}
+
+		let count = samples as u128;
+		let avg_upload = (total_upload / count) as u64;
+		let avg_download = (total_download / count) as u64;
+
+		Ok(NetworkSpeed::new(avg_upload, avg_download))
 	}
 
 	fn calculate_speed(

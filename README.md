@@ -10,7 +10,8 @@ A high-performance, modern Rust library for monitoring network interface speeds 
 
 - **🚀 High Performance**: Optimized for minimal CPU and memory usage
 - **🔄 Sync & Async APIs**: Choose between blocking and non-blocking interfaces
-- **🎛️ Configurable Filtering**: Exclude virtual interfaces, loopback, Bluetooth, etc.
+- **🎛️ Configurable Filtering**: Exclude or include interfaces by type, index, or name pattern.
+- **🎯 Precision Profiles**: Choose instant, windowed, or sampled measurement strategies.
 - **🛡️ Type Safety**: Strong typing with builder patterns and comprehensive validation
 - **📊 Rich Metrics**: Upload/download speeds in various units (bytes, bits, formatted strings)
 - **📈 Historical Tracking**: Built-in speed history and statistics

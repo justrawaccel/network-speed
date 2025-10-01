@@ -1,3 +1,4 @@
+use std::num::NonZeroU8;
 use std::time::Duration;
 
 #[cfg(feature = "serde")]
@@ -15,6 +16,9 @@ pub struct NetworkMonitorConfig {
 	pub max_counter_wrap_threshold: u64,
 	pub interface_name_filters: Vec<String>,
 	pub interface_type_filters: Vec<u32>,
+	pub include_interface_indices: Vec<u32>,
+	pub include_interface_name_patterns: Vec<String>,
+	pub precision: PrecisionMode,
 }
 
 impl NetworkMonitorConfig {
@@ -38,6 +42,16 @@ impl NetworkMonitorConfig {
 				field: "max_counter_wrap_threshold cannot be zero".to_string(),
 			});
 		}
+
+		if let PrecisionMode::Samples { samples, .. } = &self.precision {
+			if samples.get() < 2 {
+				return Err(NetworkError::InvalidConfiguration {
+					field: "precision.samples.samples must be >= 2".to_string(),
+				});
+			}
+		}
+
+		self.precision.validate()?;
 
 		Ok(())
 	}
@@ -71,6 +85,21 @@ impl NetworkMonitorConfig {
 		self.interface_type_filters.push(interface_type);
 		self
 	}
+
+	pub fn with_include_interface_indices(mut self, indices: Vec<u32>) -> Self {
+		self.include_interface_indices = indices;
+		self
+	}
+
+	pub fn with_include_interface_name_patterns(mut self, patterns: Vec<String>) -> Self {
+		self.include_interface_name_patterns = patterns;
+		self
+	}
+
+	pub fn with_precision(mut self, precision: PrecisionMode) -> Self {
+		self.precision = precision;
+		self
+	}
 }
 
 impl Default for NetworkMonitorConfig {
@@ -83,6 +112,9 @@ impl Default for NetworkMonitorConfig {
 			max_counter_wrap_threshold: 1u64 << 62,
 			interface_name_filters: Vec::new(),
 			interface_type_filters: vec![24],
+			include_interface_indices: Vec::new(),
+			include_interface_name_patterns: Vec::new(),
+			precision: PrecisionMode::Instant,
 		}
 	}
 }
@@ -143,6 +175,21 @@ impl NetworkMonitorConfigBuilder {
 		self
 	}
 
+	pub fn include_interface_indices(mut self, indices: Vec<u32>) -> Self {
+		self.config.include_interface_indices = indices;
+		self
+	}
+
+	pub fn include_interface_name_patterns(mut self, patterns: Vec<String>) -> Self {
+		self.config.include_interface_name_patterns = patterns;
+		self
+	}
+
+	pub fn precision(mut self, precision: PrecisionMode) -> Self {
+		self.config.precision = precision;
+		self
+	}
+
 	pub fn build(self) -> Result<NetworkMonitorConfig> {
 		self.config.validate()?;
 		Ok(self.config)
@@ -171,19 +218,57 @@ pub enum InterfaceFilter {
 impl InterfaceFilter {
 	pub fn matches(&self, interface: &windows::Win32::NetworkManagement::IpHelper::MIB_IFROW) -> bool {
 		match self {
-			InterfaceFilter::ByName(_name) => { false }
+			InterfaceFilter::ByName(_name) => false,
 			InterfaceFilter::ByType(interface_type) => interface.dwType == *interface_type,
-			InterfaceFilter::ByDescription(desc) => {
-				unsafe {
-					let desc_slice = std::slice::from_raw_parts(interface.bDescr.as_ptr(), interface.dwDescrLen as usize);
-					if let Ok(description) = std::str::from_utf8(desc_slice) {
-						description.to_lowercase().contains(&desc.to_lowercase())
-					} else {
-						false
-					}
+			InterfaceFilter::ByDescription(desc) => unsafe {
+				let desc_slice = std::slice::from_raw_parts(interface.bDescr.as_ptr(), interface.dwDescrLen as usize);
+				if let Ok(description) = std::str::from_utf8(desc_slice) {
+					description.to_lowercase().contains(&desc.to_lowercase())
+				} else {
+					false
 				}
 			}
 			InterfaceFilter::Custom(f) => f(interface),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PrecisionMode {
+	/// Use differential sampling based on previous measurements (default).
+	Instant,
+	/// Measure over a specific blocking window to improve accuracy.
+	Windowed {
+		duration: Duration,
+	},
+	/// Collect multiple instantaneous samples and average them.
+	Samples {
+		samples: NonZeroU8,
+		interval: Duration,
+	},
+}
+
+impl PrecisionMode {
+	pub fn validate(&self) -> Result<()> {
+		match self {
+			PrecisionMode::Instant => Ok(()),
+			PrecisionMode::Windowed { duration } => {
+				if duration.is_zero() {
+					return Err(NetworkError::InvalidConfiguration {
+						field: "precision.windowed.duration must be > 0".to_string(),
+					});
+				}
+				Ok(())
+			}
+			PrecisionMode::Samples { samples: _, interval } => {
+				if interval.is_zero() {
+					return Err(NetworkError::InvalidConfiguration {
+						field: "precision.samples.interval must be > 0".to_string(),
+					});
+				}
+				Ok(())
+			}
 		}
 	}
 }

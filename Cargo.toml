@@ -20,7 +20,12 @@ name = "network_speed"
 crate-type = ["rlib"]
 
 [dependencies]
-windows = { version = "0.52", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper"] }
+windows = { version = "0.52", features = [
+	"Win32_Foundation",
+	"Win32_NetworkManagement_IpHelper",
+	"Win32_NetworkManagement_Ndis",
+	"Win32_NetworkManagement_NetManagement"
+] }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
 tokio = { version = "1.0", features = ["time", "rt", "sync"], optional = true }
